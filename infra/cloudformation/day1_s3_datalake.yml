@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Open Payments Data Lake - S3 bucket with versioning, encryption, and lifecycle rules (Day 1)."
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: open-payments
+    Description: "Project prefix for naming."
+  BucketName:
+    Type: String
+    Description: "Globally-unique S3 bucket name (e.g., open-payments-data-123456789012)."
+  EnableLifecycle:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: "Whether to enable lifecycle transitions for noncurrent versions and cleanup."
+
+Conditions:
+  UseLifecycle: !Equals [!Ref EnableLifecycle, "true"]
+
+Resources:
+  DataLakeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+
+      VersioningConfiguration:
+        Status: Enabled
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      LifecycleConfiguration:
+        !If
+          - UseLifecycle
+          - Rules:
+              # Keep raw data auditable; manage old versions cost
+              - Id: NonCurrentVersionTransitions
+                Status: Enabled
+                NoncurrentVersionTransitions:
+                  - StorageClass: STANDARD_IA
+                    TransitionInDays: 30
+                  - StorageClass: GLACIER
+                    TransitionInDays: 90
+                NoncurrentVersionExpirationInDays: 365
+
+              # Abort incomplete multipart uploads to avoid dangling storage costs
+              - Id: AbortIncompleteMultipartUploads
+                Status: Enabled
+                AbortIncompleteMultipartUpload:
+                  DaysAfterInitiation: 7
+          - !Ref "AWS::NoValue"
+
+  # Optional: baseline bucket policy that enforces TLS for all requests.
+  DataLakeBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataLakeBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceTLS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "arn:aws:s3:::${BucketName}"
+              - !Sub "arn:aws:s3:::${BucketName}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+Outputs:
+  BucketNameOut:
+    Description: "S3 bucket for Open Payments data lake"
+    Value: !Ref DataLakeBucket

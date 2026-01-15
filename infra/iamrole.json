@@ -1,0 +1,31 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AllowUploadToRawZone",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:AbortMultipartUpload",
+                "s3:ListBucketMultipartUploads",
+                "s3:ListMultipartUploadParts"
+            ],
+            "Resource": "arn:aws:s3:::open-payments-1759a/raw/*"
+        },
+        {
+            "Sid": "AllowListBucketForPrefix",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::open-payments-1759a",
+            "Condition": {
+                "StringLike": {
+                    "s3:prefix": [
+                        "raw/*"
+                    ]
+                }
+            }
+        }
+    ]
+}

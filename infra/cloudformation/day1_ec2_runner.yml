@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Open Payments Runner - VPC + Public Subnet + SG + EC2 (Amazon Linux 2023) + IAM Role for S3 upload."
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: open-payments
+  BucketName:
+    Type: String
+    Default: open-payments-1759a
+
+  VpcCidr:
+    Type: String
+    Default: 10.10.0.0/16
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.10.1.0/24
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Existing EC2 Key Pair name for SSH."
+
+  AllowedSshCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: "For best security, set to YOUR_PUBLIC_IP/32."
+
+  GitRepoUrl:
+    Type: String
+    Default: "https://github.com/mlordjames/aws-open-payments-pipeline"
+    Description: "Public GitHub repo URL (https)."
+
+  RepoFolderName:
+    Type: String
+    Default: aws-open-payments-pipeline
+    Description: "Folder name to clone into /opt."
+
+Mappings:
+  AWSRegionToAL2023AMI:
+    # NOTE: These values change over time. In real production we'd resolve via SSM Parameter Store.
+    # For documentation purposes, keep placeholders and set AMI manually in console if needed.
+    us-east-1:
+      AmiId: "resolve-later"
+    us-east-2:
+      AmiId: "resolve-later"
+    eu-west-1:
+      AmiId: "resolve-later"
+
+Conditions:
+  IsUseKnownAmi: !Not [!Equals [!FindInMap [AWSRegionToAL2023AMI, !Ref "AWS::Region", AmiId], "resolve-later"]]
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-igw"
+
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-subnet"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-rt"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIGW
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  RunnerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "SSH access to runner"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSshCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-runner-sg"
+
+  RunnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-ec2-runner-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EC2AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Optional but recommended even if you prefer SSH:
+        # This allows SSM Session Manager as a fallback and helps with automation later.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: S3WriteToRawZone
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PutObjectsToRaw
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListBucketMultipartUploads
+                  - s3:ListMultipartUploadParts
+                Resource: !Sub "arn:aws:s3:::${BucketName}/raw/*"
+              - Sid: ListBucketRawPrefix
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${BucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix:
+                      - raw/*
+              - Sid: ReadBucketLocation
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                Resource: !Sub "arn:aws:s3:::${BucketName}"
+
+  RunnerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "${ProjectName}-ec2-runner-profile"
+      Roles:
+        - !Ref RunnerRole
+
+  RunnerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      # NOTE: AMI IDs vary by region/time. For your real run today, pick Amazon Linux 2023 in console.
+      ImageId: !If
+        - IsUseKnownAmi
+        - !FindInMap [AWSRegionToAL2023AMI, !Ref "AWS::Region", AmiId]
+        - !Ref "AWS::NoValue"
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref RunnerInstanceProfile
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          AssociatePublicIpAddress: true
+          SubnetId: !Ref PublicSubnet
+          GroupSet:
+            - !Ref RunnerSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 80
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-runner"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          dnf -y update
+          dnf -y install git python3 python3-pip
+
+          # Create a working directory
+          mkdir -p /opt/${RepoFolderName}
+          cd /opt
+
+          # Clone public repo (no login needed)
+          if [ ! -d "/opt/${RepoFolderName}/.git" ]; then
+            git clone ${GitRepoUrl} ${RepoFolderName}
+          else
+            cd /opt/${RepoFolderName}
+            git pull
+          fi
+
+          # Create run dirs
+          mkdir -p /opt/${RepoFolderName}/runs/logs
+          echo "Runner ready. Repo cloned at /opt/${RepoFolderName}" > /opt/${RepoFolderName}/runs/READY.txt
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+  PublicSubnetId:
+    Value: !Ref PublicSubnet
+  SecurityGroupId:
+    Value: !Ref RunnerSecurityGroup
+  InstanceId:
+    Value: !Ref RunnerInstance

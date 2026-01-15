@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs / data outputs
+logs/
+data/
+*.log
+
+# Airflow local
+airflow/logs/
+airflow/airflow.db
+airflow/airflow.cfg
+airflow/webserver_config.py
+devguide.txt
+day1_developer_notes.txt
+
+# AWS / credentials (never commit)
+.aws/
+**/credentials
+**/config
+
+# Terraform (later, if we add)
+.terraform/
+*.tfstate
+*.tfstate.*

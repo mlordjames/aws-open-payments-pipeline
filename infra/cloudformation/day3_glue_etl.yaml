@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Day 3 Glue ETL Infrastructure
+
+Parameters:
+  RawBucketName:
+    Type: String
+    Default: open-payments-1759a
+
+Resources:
+  CuratedDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: open_payments_curated
+
+  GlueETLRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: glue-open-payments-etl-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+Outputs:
+  CuratedDatabaseName:
+    Value: open_payments_curated

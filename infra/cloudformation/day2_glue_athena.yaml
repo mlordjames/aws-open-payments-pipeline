@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Day 2 Glue Crawler + Data Catalog (Open Payments)
+
+Parameters:
+  RawBucketName:
+    Type: String
+    Default: open-payments-1759a
+
+Resources:
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: open_payments_raw
+        Description: Raw Open Payments data
+
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: glue-open-payments-crawler-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  RawCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: open-payments-raw-crawler
+      Role: !GetAtt GlueCrawlerRole.Arn
+      DatabaseName: open_payments_raw
+      TablePrefix: raw_
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${RawBucketName}/raw/
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: DEPRECATE_IN_DATABASE
+
+Outputs:
+  DatabaseName:
+    Value: open_payments_raw
+  CrawlerName:
+    Value: open-payments-raw-crawler
